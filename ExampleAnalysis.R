@@ -1,14 +1,13 @@
 ################################################################################
-#### Example for Connectivity Analysis from Hofmann et al. 2020
+#### Example for Connectivity Analysis from Hofmann et al. 2021
 ################################################################################
 # Description: This script exemplifies the modelling approach described Hofmann
-# et al. 2020. The intention of this script is to help interested researchers to
+# et al. 2021. The intention of this script is to help interested researchers to
 # reproduce a similar analysis for their own data. Note that we assume that the
 # integrated step selection analysis (iSSF) has already been completed. For
-# further detail on iSSF analysis, we highly encourage people to read the
-# documentation by J. Fieberg and Johannes Signer
-# https://movebankworkshopraleighnc.netlify.app/2019outputfiles/multipleanimals#ssf_model,
-# the code examples given in Muff et al. 2020, and the "amt" package vignette.
+# further detail on iSSF analysis, we highly encourage you to read Fieberg et
+# al. (2020), the code examples given in Muff et al. 2020, and the "amt" package
+# vignette.
 
 # Clear R's brain
 rm(list = ls())
@@ -48,7 +47,7 @@ normalizeMap <- function(x){
 }
 
 # Function to truncate permeability surface and remove lower and upper
-# percentiles (see Squires et al. 2010)
+# percentiles (similar to Squires et al. 2010)
 truncRaster <- function(x, percentile = 0.01){
   upper <- quantile(values(x), 1 - percentile, na.rm = TRUE)
   lower <- quantile(values(x), percentile, na.rm = TRUE)
@@ -66,7 +65,7 @@ gCentroidWithin <- function(pol){
   centsInOwnPoly <- sapply(1:length(pol), function(x){
     gIntersects(pol[x,], centsDF[x, ])
   })
-  if(all(centsInOwnPoly) == TRUE){
+  if (all(centsInOwnPoly) == TRUE){
         return(centsDF)
   } else {
     newPoints <- SpatialPointsDataFrame(
@@ -101,12 +100,11 @@ names(humans) <- "Humans"
 names(water)  <- "Water"
 
 # Plot the covariates
-plot(stack(shrubs, humans, water))
+levelplot(stack(shrubs, humans, water))
 
 # Now we use the coefficients from the iSSF model to predict a permeability
-# surface. Let's assume that individuals avoid water with a relative strength
-# selection strength of 0.6 , they avoid humans with a relative strength
-# of 0.4, and they prefer shrubs/grassland with a strenght of 0.4
+# surface. Let's assume that individuals avoid water and humans but prefer
+# shrubs/grassland.
 perm <- exp(-0.6 * water - 0.4 * humans + 0.4 * shrubs)
 
 # Truncate predicted values (if desired)
@@ -116,19 +114,32 @@ perm <- truncRaster(perm, percentile = 0.01)
 plot(perm, col = viridis(50), main = "Permeability Surface")
 
 # We can now turn the permeability surface into a graph using the gdistance
-# package Here, we'll take into account each cell's surrounding 16 cells.
-# However, you could also go for 4 or 8 neighbors only (see gdistance vignette)
-trans <- transition(perm, transitionFunction = mean, directions = 16)
+# package. Here, we'll take into account each cell's 8 neighbours. However, you
+# could also go for 4 or 16 neighbors only (see gdistance vignette)
+trans <- transition(perm, transitionFunction = mean, directions = 8)
 
 # Apply geographic correction
 trans <- geoCorrection(trans, type = "c", multpl = FALSE)
 
 ################################################################################
-#### Selection of Source Points
+#### Selection of Source Points - Approach 1: Along Map Border
 ################################################################################
-# In Hofmann et al. 2020, source points were sampled within protected areas.
-# Let's therefore simulate some protected areas. For this, well create some
-# random shapes along the map borders.
+# Retrieve polygon of map extent
+ext1 <- as(extent(perm), "SpatialLines")
+
+# Distribute desired number of source points along border
+points1 <- spsample(ext1, n = 20, type = "regular")
+
+# Visualize the points
+plot(perm, col = viridis(50))
+plot(points1, add = T, col = "red", pch = 20, cex = 2)
+
+################################################################################
+#### Selection of Source Points - Approach 2: Inside Protected Areas
+################################################################################
+# Alternatively, we could distribute source points within protected areas. Let's
+# therefore simulate some protected areas. For this, well create some random
+# shapes along the map borders.
 ext1 <- as(extent(perm), "SpatialPolygons")
 ext2 <- gBuffer(ext1, width = -50)
 ext <-  gDifference(ext1, ext2)
@@ -139,37 +150,44 @@ prot$ID <- LETTERS[1:nrow(prot)]
 
 # Visualize the protected areas
 plot(perm, col = viridis(50))
-plot(prot, add = T, border = "purple")
+plot(prot, add = T, border = "red")
 
 # Overlay the study area with a regular grid of source points, but keep only
 # those that lie within protected areas.
-points <- spsample(ext1, type = "regular", n = 200)
-keep <- gContains(prot, points, byid = TRUE) %>% rowSums(.)
-points <- points[keep > 0, ]
+points2 <- spsample(ext1, type = "regular", n = 200)
+keep <- gContains(prot, points2, byid = TRUE) %>% rowSums(.)
+points2 <- points2[keep > 0, ]
 
 # Visualize
 plot(perm, col = viridis(50))
-plot(prot, add = T, border = "purple")
-plot(points, add = T, col = "red")
+plot(prot, add = T, border = "red")
+plot(points1, add = T, col = "red", pch = 20, cex = 2)
 
 # Find protected areas which do not yet contain any source points yet
-missing <- is.na(over(prot, points))
+missing <- is.na(over(prot, points2))
 
 # Create centroid for those protected areas
 centroids <- gCentroidWithin(prot[missing, ])
-points <- rbind(SpatialPoints(points), SpatialPoints(centroids))
+points2 <- rbind(SpatialPoints(points2), SpatialPoints(centroids))
 
 # Visualize them on top of the permeability surface
 plot(perm, col = viridis(50))
-plot(prot, add = T, border = "purple")
-plot(points, add = T, col = "red")
+plot(prot, add = T, border = "red")
+plot(points1, add = T, col = "red", pch = 20, cex = 2)
 
 ################################################################################
 #### Calculate Least-Cost Paths
 ################################################################################
+# Select the points you want to use
+# points <- points1
+points <- points2
+
 # Identify all possible combinations of start and end points
 combis <- as.data.frame(combinations(length(points), 2))
 names(combis) <- c("Origin", "Destin")
+
+# How many combinations are there?
+nrow(combis)
 
 # Find the shortest paths for all possible connections for the first set of
 # source points.
@@ -184,8 +202,8 @@ paths <- lapply(1:length(unique(combis$Origin)), function(x){
 # Visualize paths
 plot(perm, col = viridis(50))
 plot(paths, add = T, col = "white")
-plot(prot, add = T, border = "purple")
-plot(points, add = T, col = "red")
+plot(prot, add = T, border = "red")
+plot(points1, add = T, col = "red", pch = 20, cex = 2)
 
 ################################################################################
 #### Calculate Least-Cost Corridors
@@ -195,6 +213,10 @@ plot(points, add = T, col = "red")
 cost <- lapply(1:length(points), function(x){
   accCost(trans, points[x, ])
 }) %>% stack()
+
+# Can visualize the cumulative cost map for each source point
+plot(cost[[1]], col = viridis(50))
+plot(points[1, ], add = T, col = "red", pch = 20, cex = 5)
 
 # To identify a corridor between two maps, we need to sum their cost-maps and
 # identify the cheapest set of pixels. Let's write a function to do this.
@@ -207,7 +229,7 @@ getCorr <- function(x, y, percent = 0.01){
   return(corr)
 }
 
-# Identify a corridors for first set of source points
+# Identify a corridors
 corrs <- lapply(1:nrow(combis), function(x){
   getCorr(cost[[combis$Origin[x]]], cost[[combis$Destin[x]]], percent = 0.02)
 }) %>% stack()
@@ -224,6 +246,6 @@ plot(paths, add = T, col = colTrans("white", percent = 80))
 ################################################################################
 # Visualize LCPs and LCCs
 plot(corrs, col = magma(50))
-plot(points, add = T, col = "red")
-plot(prot, add = T, border = colTrans("purple", percent = 20))
+plot(points, add = T, col = "red", pch = 20, cex = 2)
+plot(prot, add = T, border = colTrans("red", percent = 20))
 plot(paths, add = T, col = colTrans("white", percent = 80))
