@@ -203,7 +203,7 @@ paths <- lapply(1:length(unique(combis$Origin)), function(x){
 plot(perm, col = viridis(50))
 plot(paths, add = T, col = "white")
 plot(prot, add = T, border = "red")
-plot(points1, add = T, col = "red", pch = 20, cex = 2)
+plot(points, add = T, col = "red", pch = 20, cex = 2)
 
 ################################################################################
 #### Calculate Least-Cost Corridors
@@ -238,7 +238,7 @@ corrs <- calc(corrs, sum)
 
 # Visualize corridors
 plot(corrs, col = magma(50))
-plot(points, add = T, col = "red")
+plot(points, add = T, col = "red", pch = 20, cex = 2)
 plot(paths, add = T, col = colTrans("white", percent = 80))
 
 ################################################################################
